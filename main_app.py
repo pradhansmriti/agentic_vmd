@@ -1,7 +1,5 @@
 from fastapi import FastAPI, UploadFile, File, Form
-from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from fastapi.staticfiles import StaticFiles
 from openai import OpenAI
 import os
 client = OpenAI(base_url="https://openrouter.ai/api/v1",api_key="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")
@@ -18,20 +16,6 @@ def convert_tga_to_png(tga_path, png_path):
 
 
 
-app = FastAPI()
-
-
-#serve images from static
-os.makedirs("static", exist_ok=True)
-app.mount("/static", StaticFiles(directory="static"), name="static")
-
-# Allow local dev requests (optional for Streamlit)
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
 
 # Set your OpenAI key (or use environment variable)
 
@@ -57,8 +41,6 @@ def prompt_to_vmd_script(prompt: str) -> str:
 def run_vmd_script(script: str, pdb_path: str) -> str:
     script_path = f"/tmp/vmd_script_{uuid.uuid4().hex}.tcl"
     img_path = script_path.replace(".tcl", ".tga")
-    png_path=img_path.replace(".tga",".png")
-    final_path=f"static/vmd_{uuid.uuid4().hex}.png"
 
     # Prepare script
     with open(script_path, "w") as f:
@@ -72,13 +54,13 @@ def run_vmd_script(script: str, pdb_path: str) -> str:
 
     # Convert image to PNG (optional, needs imagemagick)
     convert_tga_to_png(img_path,png_path)
-    shutil.move(png_path,final_path)
+    png_path = img_path.replace(".tga", ".png")
+    #shutil.move(png_path,f'./vmd_agent.png')
     #subprocess.run(["convert", img_path, png_path])
 
-    return f"http://localhost:8000/{final_path}"
+    return png_path
 
 # POST endpoint
-@app.post("/vmd/run")
 async def vmd_run(prompt: str =Form(...), pdb_file: UploadFile = File(...)):
     # Save PDB file locally
     pdb_path = f"/tmp/{uuid.uuid4().hex}.pdb"
@@ -96,14 +78,39 @@ async def vmd_run(prompt: str =Form(...), pdb_file: UploadFile = File(...)):
         "image_path": image_path,
         "message": "VMD script executed and image generated."
     }
-"""""
+
 import streamlit as st
+import requests
+import os
 
-st.title("LLM-Driven Molecular Viewer")
+st.set_page_config(page_title="VMD Visualizer", layout="centered")
+st.title("🧬 Natural Language VMD Interface")
 
-user_input = st.text_input("Describe your visualization task:")
-if st.button("Run"):
-    vmd_code = prompt_to_vmd_code(user_input, model="gpt-4")
-    st.code(vmd_code, language="tcl")
-    run_vmd_script(vmd_code)
-"""
+# Prompt input
+prompt = st.text_input("Enter your visualization prompt:", placeholder="e.g. Show only chain A and color it red")
+
+# File uploader
+pdb_file = st.file_uploader("Upload a PDB file", type=["pdb"])
+
+if st.button("Run VMD"):
+    if prompt and pdb_file:
+        
+        files = {"pdb_file": (pdb_file.name, pdb_file.getvalue())}
+        data = {"prompt": prompt}
+        with st.spinner("Generating visualization..."):
+            res = requests.post("http://localhost:8501/vmd/run", files=files, data=data)
+        if res.status_code == 200:
+            result = res.json()
+            st.success("✅ VMD script executed!")
+            # Download the image from FastAPI (if it's served as a static file)
+            image_url = result["image_path"]
+            print(image_url)
+            img_response = requests.get(image_url)
+
+            if img_response.status_code == 200:
+                st.image(img_response.content, caption="Rendered Snapshot", use_column_width=True)
+            else:
+                st.warning("Image could not be loaded.")
+
+    else:
+        st.warning("Please provide both a prompt and a PDB file.")
