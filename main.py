@@ -44,7 +44,14 @@ def prompt_to_vmd_script(prompt: str) -> str:
     system_message = (
         "You are an expert in VMD Tcl scripting. Given a natural language prompt, "
         "convert it into a VMD Tcl script that assumes the structure has been loaded. "
-        "Do not include loading commands unless asked."
+        "Start with no representation (delrep)"
+        "add new representation of selection from prompt."
+        "Make the background display color always white with: color Display Background white"
+        "Turn off axes and depth cueing"
+        "when using coloring method use color codes in vmd by default."
+        " Default color codes are 0:blue, 1:red, 2:gray 3:orange 4:yellow 5:tan 6:silver,"
+        "7:Green 8:white 9:pink 10:cyan."
+        "Make the default drwaing method VDW unless stated otherwise."
     )
     completion = client.chat.completions.create(model="openai/gpt-4o",
     messages=[
