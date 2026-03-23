@@ -2,10 +2,10 @@ from fastapi import FastAPI, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from fastapi.staticfiles import StaticFiles
-from openai import OpenAI
+import anthropic
 import os
-client = OpenAI(base_url="https://openrouter.ai/api/v1",api_key="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")
-import os
+client = anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
+
 import subprocess
 import uuid
 from pathlib import Path
@@ -33,8 +33,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Set your OpenAI key (or use environment variable)
-
 # Request model
 class PromptRequest(BaseModel):
     prompt: str
@@ -43,22 +41,21 @@ class PromptRequest(BaseModel):
 def prompt_to_vmd_script(prompt: str) -> str:
     system_message = (
         "You are an expert in VMD Tcl scripting. Given a natural language prompt, "
-        "convert it into a VMD Tcl script that assumes the structure has been loaded. "
-        "Start with no representation (delrep)"
-        "add new representation of selection from prompt."
-        "Make the background display color always white with: color Display Background white"
-        "Turn off axes and depth cueing"
-        "when using coloring method use color codes in vmd by default."
-        " Default color codes are 0:blue, 1:red, 2:gray 3:orange 4:yellow 5:tan 6:silver,"
-        "7:Green 8:white 9:pink 10:cyan."
-        "Make the default drwaing method VDW unless stated otherwise."
+        "output ONLY the raw VMD Tcl script with no explanation, no markdown, no code fences. "
+        "The structure is already loaded — do not include mol new or loading commands. "
+        "Always start with: mol delrep 0 top\n"
+        "Always set: color Display Background white\n"
+        "Always turn off axes and depth cueing.\n"
+        "Use VMD numeric color codes: 0=blue, 1=red, 2=gray, 3=orange, 4=yellow, 5=tan, 6=silver, 7=green, 8=white, 9=pink, 10=cyan.\n"
+        "Representation rules: Choose the closest drawing method to whatever is specified in the prompt, otherwise use VDW as default drawing method\n"
+        )
+    message = client.messages.create(
+        model="claude-sonnet-4-6",
+        max_tokens=1024,
+        system=system_message,
+        messages=[{"role": "user", "content": prompt}]
     )
-    completion = client.chat.completions.create(model="openai/gpt-4o",
-    messages=[
-        {"role": "system", "content": system_message},
-        {"role": "user", "content": prompt}
-    ])
-    return completion.choices[0].message.content
+    return message.content[0].text
 
 # Function: run VMD script
 def run_vmd_script(script: str, pdb_path: str) -> str:
@@ -103,6 +100,20 @@ async def vmd_run(prompt: str =Form(...), pdb_file: UploadFile = File(...)):
         "image_path": image_path,
         "message": "VMD script executed and image generated."
     }
+@app.post("/vmd/run-tcl")
+async def vmd_run_tcl(tcl_script: str = Form(...), pdb_file: UploadFile = File(...)):
+    pdb_path = f"/tmp/{uuid.uuid4().hex}.pdb"
+    with open(pdb_path, "wb") as f:
+        f.write(await pdb_file.read())
+
+    image_path = run_vmd_script(tcl_script, pdb_path)
+
+    return {
+        "script": tcl_script,
+        "image_path": image_path,
+        "message": "VMD script executed from provided Tcl code."
+    }
+
 """""
 import streamlit as st
 
